@@ -78,8 +78,9 @@ class LlamaServerManager:
                 "--model", model_path,
                 "--port", str(port),
                 "--host", host,
-                "--log-disable"  # Suppress llama.cpp logs
-            ], 
+                "--log-disable",  # Suppress llama.cpp logs
+                "--gpu-layers", "99",  # Offload all layers to GPU (Vulkan)
+            ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             preexec_fn=os.setsid  # Create new process group for clean shutdown
