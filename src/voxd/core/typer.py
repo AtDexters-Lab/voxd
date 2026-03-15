@@ -8,6 +8,22 @@ from voxd.utils.libw import verbo
 import pyperclip  # New: clipboard helper for instant paste
 from pathlib import Path
 
+# Pre-computed key-up args for all common printable scancodes.
+# Sent after ydotool 'type' to release any key left stuck in the
+# kernel input layer when the daemon drops a key-up event.
+_YDOTOOL_RELEASE_ARGS = [f"{kc}:0" for kc in (
+    list(range(2, 14)) +    # 1-9, 0, minus, equal
+    list(range(16, 28)) +   # q-p, [, ]
+    list(range(30, 42)) +   # a-l, ;, ', `
+    [43] +                  # backslash
+    list(range(44, 54)) +   # z-m, comma, dot, slash
+    [57]                    # space
+)]
+
+# Seconds to wait for ydotoold to drain its event queue before
+# sending key-release events.
+_YDOTOOL_DRAIN_DELAY = 0.05
+
 def detect_backend():
     """
     Return a best-guess of the active graphical backend.
@@ -237,6 +253,29 @@ class SimulatedTyper:
         except Exception as e:
             print(f"[typer] ⚠️ Typing tool failed: {e}")
 
+    def _release_all_keys_ydotool(self):
+        """Send key-up events for common printable keys via ydotool.
+
+        ydotool 'type' at low delays can leave the last character's key-down
+        stuck in the kernel input layer.  Sending explicit key-up (scancode:0)
+        for the most likely culprits clears the stuck state.
+        """
+        if not self.tool:
+            return
+        try:
+            subprocess.run(
+                [self.tool, "key"] + _YDOTOOL_RELEASE_ARGS,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
+            )
+        except Exception as e:
+            verbo(f"[typer] key-release cleanup failed: {e}")
+
+    def _run_ydotool_type(self, delay_str: str, text: str):
+        """Run ydotool type and release any stuck keys afterward."""
+        self._run_tool([self.tool, "type", "-d", delay_str, text])
+        time.sleep(_YDOTOOL_DRAIN_DELAY)
+        self._release_all_keys_ydotool()
+
     def flush_stdin(self):
         """Force clear stdin buffer using terminal control"""
         # Skip if no proper terminal (e.g., when launched via .desktop)
@@ -280,7 +319,7 @@ class SimulatedTyper:
         verbo(f"[typer] Typing transcript using {self.tool}...")
         tool_name = os.path.basename(self.tool) if self.tool else ""
         if tool_name == "ydotool" and self.tool:
-            self._run_tool([self.tool, "type", "-d", self.delay_str, t])
+            self._run_ydotool_type(self.delay_str, t)
         elif tool_name == "xdotool" and self.tool:
             self._run_tool([self.tool, "type", "--delay", self.delay_str, t])
         else:
@@ -376,11 +415,11 @@ class SimulatedTyper:
         verbo(f"[typer] Typing transcript character-by-character using {self.tool}...")
         tool_name = os.path.basename(self.tool) if self.tool else ""
         if tool_name == "ydotool" and self.tool:
-            self._run_tool([self.tool, "type", "-d", "10", t])  # Use 10ms delay for fallback
+            self._run_ydotool_type("10", t)  # 10ms delay for fallback
         elif tool_name == "xdotool" and self.tool:
             self._run_tool([self.tool, "type", "--delay", "10", t])  # Use 10ms delay for fallback
         else:
             print("[typer] ⚠️ No valid typing tool found for fallback.")
             return
-        
+
         self.flush_stdin()
