@@ -40,6 +40,23 @@ DEFAULT_CONFIG = {
     "whisper_binary": "whisper.cpp/build/bin/whisper-cli",
     "whisper_model_path": "whisper.cpp/models/ggml-base.en.bin",
     "language": "en",
+    # Gemma audio transcription (tray/hotkey MVP; Whisper remains for rollback)
+    "transcription_backend": "gemma",
+    "gemma_server_url": "http://localhost:9292",
+    "gemma_model": "gemma-e4b",
+    "gemma_timeout": 300,
+    "gemma_segment_seconds": 25,
+    "gemma_segment_overlap_seconds": 1,
+    "gemma_max_tokens": 1024,
+    "gemma_transcription_prompt": (
+        "Transcribe the following speech exactly as spoken. Do not translate it. "
+        "For Hindi or mixed Hindi-English speech, write Hindi words in natural "
+        "Latin/Roman script (Hinglish), never Devanagari. Preserve English words, "
+        "names, numbers, and intended capitalization. Add natural punctuation from "
+        "pauses and intonation: end complete thoughts with periods, use question "
+        "marks for questions, and add commas where natural. Do not paraphrase or "
+        "change the spoken wording. Return only the transcription, with no commentary."
+    ),
 
     # --- Flux (VAD-driven continuous dictation) ------------------------------
     # Defaults are conservative and CPU-light; Flux VAD is built-in

@@ -23,6 +23,8 @@ _YDOTOOL_RELEASE_ARGS = [f"{kc}:0" for kc in (
 # Seconds to wait for ydotoold to drain its event queue before
 # sending key-release events.
 _YDOTOOL_DRAIN_DELAY = 0.05
+_YDOTOOL_TEXT_CHUNK_CHARS = 400
+_YDOTOOL_KEY_HOLD_MS = 5
 
 def detect_backend():
     """
@@ -239,19 +241,24 @@ class SimulatedTyper:
             verbo(f"[typer] Failed to auto-start ydotool daemon: {e}")
             return False
 
-    def _run_tool(self, cmd: list[str]):
+    def _run_tool(self, cmd: list[str], *, timeout: float = 10) -> bool:
         """Run *cmd* catching FileNotFoundError so GUI won't freeze."""
         try:
-            result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+            result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout)
             if result.returncode != 0:
                 print(f"[typer] ⚠️ Typing tool exited with code {result.returncode}")
+                return False
+            return True
         except subprocess.TimeoutExpired:
-            print(f"[typer] ⚠️ Typing tool timed out after 10 seconds")
+            print(f"[typer] ⚠️ Typing tool timed out after {timeout:.1f} seconds")
+            return False
         except FileNotFoundError:
             print(f"[typer] ⚠️ Typing tool executable not found: {cmd[0]} – falling back to clipboard only.")
             self.enabled = False
+            return False
         except Exception as e:
             print(f"[typer] ⚠️ Typing tool failed: {e}")
+            return False
 
     def _release_all_keys_ydotool(self):
         """Send key-up events for common printable keys via ydotool.
@@ -270,11 +277,57 @@ class SimulatedTyper:
         except Exception as e:
             verbo(f"[typer] key-release cleanup failed: {e}")
 
-    def _run_ydotool_type(self, delay_str: str, text: str):
+    def _run_ydotool_type(self, delay_str: str, text: str) -> None:
         """Run ydotool type and release any stuck keys afterward."""
-        self._run_tool([self.tool, "type", "-d", delay_str, text])
+        try:
+            delay_ms = max(1.0, float(delay_str))
+        except (TypeError, ValueError):
+            delay_ms = 10.0
+        # ydotool's key delay excludes its separate key-hold delay. The latter
+        # defaults to 20 ms, which made the old timeout kill long transcripts
+        # even when typing_delay was only 1-2 ms. Set it explicitly and budget
+        # for both delays.
+        expected_seconds = len(text) * (delay_ms + _YDOTOOL_KEY_HOLD_MS) / 1000.0
+        timeout = max(5.0, expected_seconds * 2.0 + 3.0)
+        succeeded = self._run_tool(
+            [
+                self.tool,
+                "type",
+                "-d",
+                delay_str,
+                "-H",
+                str(_YDOTOOL_KEY_HOLD_MS),
+                text,
+            ],
+            timeout=timeout,
+        )
         time.sleep(_YDOTOOL_DRAIN_DELAY)
         self._release_all_keys_ydotool()
+        if not succeeded:
+            raise RuntimeError("ydotool failed before the complete transcript was typed")
+
+    @staticmethod
+    def _split_typing_chunks(text: str, max_chars: int = _YDOTOOL_TEXT_CHUNK_CHARS):
+        """Yield bounded chunks without altering whitespace or character order."""
+        if max_chars < 1:
+            raise ValueError("max_chars must be positive")
+
+        start = 0
+        while len(text) - start > max_chars:
+            limit = start + max_chars
+            split_at = max(
+                text.rfind(" ", start, limit),
+                text.rfind("\n", start, limit),
+                text.rfind("\t", start, limit),
+            )
+            if split_at < start + max_chars // 2:
+                split_at = limit
+            else:
+                split_at += 1  # keep the boundary whitespace in this chunk
+            yield text[start:split_at]
+            start = split_at
+        if start < len(text):
+            yield text[start:]
 
     def flush_stdin(self):
         """Force clear stdin buffer using terminal control"""
@@ -319,7 +372,8 @@ class SimulatedTyper:
         verbo(f"[typer] Typing transcript using {self.tool}...")
         tool_name = os.path.basename(self.tool) if self.tool else ""
         if tool_name == "ydotool" and self.tool:
-            self._run_ydotool_type(self.delay_str, t)
+            for chunk in self._split_typing_chunks(t):
+                self._run_ydotool_type(self.delay_str, chunk)
         elif tool_name == "xdotool" and self.tool:
             self._run_tool([self.tool, "type", "--delay", self.delay_str, t])
         else:

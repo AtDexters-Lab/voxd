@@ -35,27 +35,54 @@ class CoreProcessThread(QThread):
 
         recorder = AudioRecorder()
 
-        # Ensure whisper-cli exists – attempt auto-build when missing
-        from voxd.utils.whisper_auto import ensure_whisper_cli  # local import to avoid GUI deps in headless tests
+        transcription_backend = self.cfg.data.get("transcription_backend", "whisper")
+        if transcription_backend == "gemma":
+            from voxd.core.gemma_transcriber import GemmaAudioTranscriber
 
-        try:
-            transcriber = WhisperTranscriber(
-                model_path=self.cfg.whisper_model_path,
-                binary_path=self.cfg.whisper_binary,
-                language=getattr(self.cfg, "language", "en"),
-            )
-        except FileNotFoundError:
-            # Try to build on the fly (GUI prompt)
-            if ensure_whisper_cli("gui") is None:
-                # User declined or build failed – abort gracefully
+            try:
+                transcriber = GemmaAudioTranscriber(
+                    server_url=self.cfg.data.get("gemma_server_url", "http://localhost:9292"),
+                    model=self.cfg.data.get("gemma_model", "gemma-e4b"),
+                    prompt=self.cfg.data.get("gemma_transcription_prompt", ""),
+                    segment_seconds=float(self.cfg.data.get("gemma_segment_seconds", 25)),
+                    overlap_seconds=float(self.cfg.data.get("gemma_segment_overlap_seconds", 1)),
+                    timeout=float(self.cfg.data.get("gemma_timeout", 300)),
+                    max_tokens=int(self.cfg.data.get("gemma_max_tokens", 1024)),
+                )
+            except (TypeError, ValueError) as exc:
+                print(f"[core] Invalid Gemma transcription configuration: {exc}")
                 self.status_changed.emit("VOXD")
                 self.finished.emit("")
                 return
-            transcriber = WhisperTranscriber(
-                model_path=self.cfg.whisper_model_path,
-                binary_path=self.cfg.whisper_binary,
-                language=getattr(self.cfg, "language", "en"),
-            )
+            trans_model = self.cfg.data.get("gemma_model", "gemma-e4b")
+        elif transcription_backend == "whisper":
+            # Preserve Whisper as an explicit rollback path during the MVP.
+            from voxd.utils.whisper_auto import ensure_whisper_cli
+
+            try:
+                transcriber = WhisperTranscriber(
+                    model_path=self.cfg.whisper_model_path,
+                    binary_path=self.cfg.whisper_binary,
+                    language=getattr(self.cfg, "language", "en"),
+                )
+            except FileNotFoundError:
+                if ensure_whisper_cli("gui") is None:
+                    self.status_changed.emit("VOXD")
+                    self.finished.emit("")
+                    return
+                transcriber = WhisperTranscriber(
+                    model_path=self.cfg.whisper_model_path,
+                    binary_path=self.cfg.whisper_binary,
+                    language=getattr(self.cfg, "language", "en"),
+                )
+            from pathlib import Path as _P
+
+            trans_model = _P(self.cfg.whisper_model_path).name
+        else:
+            print(f"[core] Unknown transcription backend: {transcription_backend!r}")
+            self.status_changed.emit("VOXD")
+            self.finished.emit("")
+            return
         typer = SimulatedTyper(delay=self.cfg.typing_delay, start_delay=self.cfg.typing_start_delay, cfg=self.cfg)
         clipboard = ClipboardManager()
 
@@ -71,23 +98,30 @@ class CoreProcessThread(QThread):
 
         # ── Transcription ----------------------------------------------
         trans_start_ts = time()
-        tscript, _ = transcriber.transcribe(rec_path)
+        try:
+            tscript, _ = transcriber.transcribe(rec_path)
+        except Exception as exc:
+            print(f"[core] Transcription failed: {exc}")
+            self.finished.emit("")
+            return
         trans_end_ts = time()
         if not tscript:
             self.finished.emit("")
             return
 
-        # --- Apply AIPP if enabled ---
+        # Gemma already returns the requested final dictation text. Keep legacy
+        # AIPP available only on the Whisper rollback path during the MVP.
+        apply_aipp = transcription_backend != "gemma" and self.cfg.aipp_enabled
         aipp_start_ts = aipp_end_ts = None
-        final_text = get_final_text(tscript, self.cfg)
-        if self.cfg.aipp_enabled and final_text and final_text != tscript:
+        final_text = get_final_text(tscript, self.cfg) if apply_aipp else tscript
+        if apply_aipp and final_text and final_text != tscript:
             aipp_start_ts = time()
             # get_final_text already ran; so timing is approximated. We skip precise.
             aipp_end_ts = aipp_start_ts  # zero duration placeholder due to prior exec
 
         # === Logging ------------------------------------------------------
         try:
-            if self.cfg.aipp_enabled:
+            if apply_aipp:
                 # Log both original and, if different, AIPP output
                 self.logger.log_entry(f"[original] {tscript}")
                 if final_text and final_text != tscript:
@@ -119,7 +153,6 @@ class CoreProcessThread(QThread):
 
         # ── Performance logging ---------------------------------------
         if self.cfg.perf_collect:
-            from pathlib import Path as _P
             from voxd.utils.performance import write_perf_entry
 
             perf_entry = {
@@ -133,15 +166,15 @@ class CoreProcessThread(QThread):
                 "trans_eff": (trans_end_ts - trans_start_ts) / max(len(tscript), 1),
                 "transcript": tscript,
                 "usr_trans_acc": usr_trans_acc,
-                "trans_model": _P(self.cfg.whisper_model_path).name,
+                "trans_model": trans_model,
                 "aipp_start_time": datetime.fromtimestamp(aipp_start_ts).strftime("%H:%M:%S") if aipp_start_ts else None,
                 "aipp_end_time": datetime.fromtimestamp(aipp_end_ts).strftime("%H:%M:%S") if aipp_end_ts else None,
                 "aipp_dur": (aipp_end_ts - aipp_start_ts) if aipp_start_ts and aipp_end_ts else None,
-                "ai_model": self.cfg.aipp_model if self.cfg.aipp_enabled else None,
-                "ai_provider": self.cfg.aipp_provider if self.cfg.aipp_enabled else None,
-                "ai_prompt": self.cfg.aipp_active_prompt if self.cfg.aipp_enabled else None,
-                "ai_transcript": final_text if self.cfg.aipp_enabled else None,
-                "aipp_eff": ((aipp_end_ts - aipp_start_ts) / max(len(final_text), 1)) if self.cfg.aipp_enabled and aipp_start_ts and aipp_end_ts and final_text else None,
+                "ai_model": self.cfg.data.get("aipp_model") if apply_aipp else None,
+                "ai_provider": self.cfg.aipp_provider if apply_aipp else None,
+                "ai_prompt": self.cfg.aipp_active_prompt if apply_aipp else None,
+                "ai_transcript": final_text if apply_aipp else None,
+                "aipp_eff": ((aipp_end_ts - aipp_start_ts) / max(len(final_text), 1)) if apply_aipp and aipp_start_ts and aipp_end_ts and final_text else None,
                 "sys_mem": psutil.virtual_memory().total,
                 "sys_cpu": psutil.cpu_freq().max,
                 "total_dur": (trans_end_ts - trans_start_ts) + (rec_end_dt - rec_start_dt).total_seconds()
