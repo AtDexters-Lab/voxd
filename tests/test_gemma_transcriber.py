@@ -109,12 +109,15 @@ def test_gemma_default_session_does_not_inherit_environment_proxies():
 def test_default_prompt_is_scoped_computer_dictation_context():
     from voxd.core.gemma_transcriber import DEFAULT_PROMPT
 
+    assert "ASCII Latin letters (A-Z and a-z)" in DEFAULT_PROMPT
+    assert "Never output Devanagari or any other Indic script" in DEFAULT_PROMPT
+    assert "transliterate every Hindi word into natural Roman Hinglish" in DEFAULT_PROMPT
     assert "live voice dictation on a computer" in DEFAULT_PROMPT
     assert "coding tools" in DEFAULT_PROMPT
     assert "web searches" in DEFAULT_PROMPT
     assert "only to resolve likely words and sentence boundaries" in DEFAULT_PROMPT
-    assert "do not answer the speaker" in DEFAULT_PROMPT
-    assert "Infer readable punctuation" in DEFAULT_PROMPT
+    assert "Do not answer the speaker" in DEFAULT_PROMPT
+    assert "Add readable punctuation" in DEFAULT_PROMPT
 
 
 def test_gemma_failure_retries_and_retains_audio(monkeypatch, tmp_path):
