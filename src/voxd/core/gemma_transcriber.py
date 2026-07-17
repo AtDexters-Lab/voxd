@@ -110,6 +110,24 @@ class GemmaAudioTranscriber:
 
         return merged, "\n".join(transcripts)
 
+    def warmup(self) -> None:
+        """Force the configured model to load without consuming recorded audio."""
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": "Reply with OK."}],
+            "stream": False,
+            "temperature": 0.0,
+            "max_tokens": 1,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        response = self.session.post(
+            f"{self.server_url}/v1/chat/completions",
+            json=payload,
+            timeout=min(self.timeout, 60.0),
+        )
+        response.raise_for_status()
+        verbo(f"[gemma] {self.model} warmup complete")
+
     def _iter_wav_segments(self, audio_file: Path) -> Iterator[tuple[int, bytes]]:
         try:
             source = wave.open(str(audio_file), "rb")

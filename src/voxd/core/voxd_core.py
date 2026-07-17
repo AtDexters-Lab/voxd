@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from threading import Thread
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from voxd.core.gemma_transcriber import GemmaAudioTranscriber
@@ -41,6 +43,13 @@ class CoreProcessThread(QThread):
                 prefer_pulse=self.cfg.audio_prefer_pulse,
             )
             recorder.start_recording()
+            warmup_thread = Thread(
+                target=self._warmup_model,
+                args=(transcriber,),
+                name="voxd-gemma-warmup",
+                daemon=True,
+            )
+            warmup_thread.start()
             while not self.should_stop:
                 self.msleep(100)
 
@@ -48,6 +57,7 @@ class CoreProcessThread(QThread):
             recording_path = recorder.stop_recording()
             if recording_path is None:
                 raise RuntimeError("recorder produced no audio file")
+            warmup_thread.join()
             transcript, _ = transcriber.transcribe(recording_path)
             if not transcript:
                 raise RuntimeError("E4B returned an empty transcript")
@@ -86,3 +96,13 @@ class CoreProcessThread(QThread):
             transcript = ""
         finally:
             self.finished.emit(transcript)
+
+    @staticmethod
+    def _warmup_model(transcriber) -> None:
+        try:
+            transcriber.warmup()
+        except Exception as exc:
+            print(
+                f"[core] Model warmup failed; continuing with normal transcription: {exc}",
+                flush=True,
+            )

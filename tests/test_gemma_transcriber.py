@@ -106,6 +106,28 @@ def test_gemma_default_session_does_not_inherit_environment_proxies():
     assert transcriber.session.trust_env is False
 
 
+def test_gemma_warmup_sends_minimal_text_request():
+    from voxd.core.gemma_transcriber import GemmaAudioTranscriber
+
+    session = _Session(["OK"])
+    transcriber = GemmaAudioTranscriber(session=session)
+
+    transcriber.warmup()
+
+    assert len(session.calls) == 1
+    url, payload, timeout = session.calls[0]
+    assert url == "http://localhost:9292/v1/chat/completions"
+    assert timeout == 60
+    assert payload == {
+        "model": "gemma-e4b",
+        "messages": [{"role": "user", "content": "Reply with OK."}],
+        "stream": False,
+        "temperature": 0.0,
+        "max_tokens": 1,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+
+
 def test_default_prompt_is_scoped_computer_dictation_context():
     from voxd.core.gemma_transcriber import DEFAULT_PROMPT
 
