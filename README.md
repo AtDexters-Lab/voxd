@@ -1,425 +1,88 @@
-# VOXD - Voice-Type / dictation app for Linux 🗣️⌨️
-<div align="center">
-  <img src="src/voxd/assets/voxd-1.png" alt="VOXD logo" width="128" />
-</div>
+# VOXD
 
-Running in background, provides fast **voice-to-text typing** in any Linux app.  
-Using <span style="color:#FF4500">**LOCAL** (offline)</span> voice processing, with optional <span style="color:#FF4500">**LOCAL**</span> (offline) AI text post-processing.  
-Runs fine even on older CPUs. No GPU required.
+VOXD is a small Linux tray app for speech typing. It records until you stop,
+transcribes through a local OpenAI-compatible Gemma E4B service, and inserts the
+result as genuine keyboard input with `ydotool`.
 
-Hit your <span style="color:#FF4500">**hotkey shortcut**</span> -> speak -> hotkey again -> watch your words appear wherever the cursor currently is, even AI-rewritten as a poem or a C++ code.  
-  
-**Tested & Works on:**
-- Arch / Hyprland
-- Omarchy 3.0
-- Ubuntu 24.04 / GNOME
-- Ubuntu 25.04 / Sway
-- Fedora 42 / KDE
-- Pop!_OS 22 / COSMIC
-- Mint 22 / Cinnamon
-- openSUSE / Leap 15.6
+It deliberately has one runtime path: tray → recorder → E4B → clipboard recovery
+copy → `ydotool`. There is no Whisper model manager, post-processing layer,
+paste-based insertion, or continuous VAD mode.
 
+## What it supports
 
-## Highlights
+- Hindi in Latin/Roman script (Hinglish), English, and mixed speech
+- punctuation inferred from pauses and intonation
+- recordings of arbitrary practical length
+- E4B's sub-30-second input limit through sequential 25-second segments with a
+  1-second overlap
+- complete text insertion into terminals and coding tools through real key events
+- failure recovery: source audio is kept if transcription fails, and VOXD tries
+  to copy the final transcript before typing
 
-| Feature                          | Notes                                                                   |
-| -------------------------------- | ----------------------------------------------------------------------- |
-| **Whisper.cpp** backend          | Local, offline, fast  ASR.   |
-| **Simulated typing**             | instantly types straight into any currently focused input window. Even on Wayland! (*ydotool*).  |
-| **Clipboard**                    | Auto-copies into clipboard - ready for pasting, if desired              |
-| **Languages**                    | 99+ languages. Provides default language config and session language override          |
-| **AIPP**, AI Post-Processing	   | AI-rewriting via local or cloud LLMs. GUI prompt editor.                |  
-| **Multiple UI** surfaces         | CLI, GUI (minimal PyQt6), TRAY (system tray), FLUX (triggered by voice activity detection, beta) |
-| **Logging** & **performance**    | Session log plus your own optional local performance data (CSV).        |
- 
-  
+Recording is streamed to bounded on-disk chunks, so speech duration is not capped
+by memory. Transcription begins after Stop and processes each E4B segment in order.
 
-## Setup
+## Requirements
 
-Complete the 2 steps:  
-1. <span style="color:#FF4500">**Install VOXD**</span>
-2. <span style="color:#FF4500">**setup a hotkey**</span>.  
+- Linux with PipeWire/PulseAudio or another PortAudio input
+- Python 3.9+
+- `ydotool`, `ydotoold`, and a working user `ydotoold.service`
+- an OpenAI-compatible E4B endpoint, defaulting to `http://localhost:9292`
 
-### 1. Install VOXD
+The endpoint must accept audio content at `/v1/chat/completions` using the
+OpenAI-style `input_audio` message shape.
 
-#### Install from Release (recommended)
-Download the package for your distro and architecture from the latest release, then install with your package manager.
-
-Latest builds: [GitHub Releases (Latest)](https://github.com/jakovius/voxd/releases/latest)  
-
-#### **Ubuntu / Debian (.deb)**
+## Source install
 
 ```bash
-# Update package lists and install the downloaded .deb package:
-sudo apt update
-sudo apt install -y ./voxd_*_amd64.deb    # or ./voxd_*_arm64.deb on ARM systems
+./setup.sh
 ```
 
----
-
-#### **Fedora (.rpm)**
+Then start the tray:
 
 ```bash
-# Update repositories and install the downloaded .rpm package:
-sudo dnf update -y
-sudo dnf install -y ./voxd-*-x86_64.rpm  # or the arm64 counterpart if on an ARM device
+.venv/bin/voxd --tray
 ```
 
----
-
-#### **Arch Linux (.pkg.tar.zst)**
+Bind a desktop shortcut to toggle recording:
 
 ```bash
-# Synchronize package databases and install the downloaded .pkg.tar.zst package:
-sudo pacman -Sy
-sudo pacman -U ./voxd-*-x86_64.pkg.tar.zst    # or the arm64 counterpart if on an ARM device
+/absolute/path/to/voxd/.venv/bin/voxd --trigger-record
 ```
 
----
+Start speaking after the tray shows Recording. Trigger again to stop; VOXD waits
+for the complete transcription and then types it into the focused application.
 
-#### **openSUSE (.rpm)**
+## Configuration
 
-```bash
-# Refresh repositories and install the downloaded .rpm package with dependency resolution:
-sudo zypper refresh
-sudo zypper install --force-resolution ./voxd-*-x86_64.rpm   # or the arm64 counterpart if on an ARM device
-```
-
-#### Alternatively: Download the source or clone the repo, and run the setup:  
-
-```bash
-git clone https://github.com/jakovius/voxd.git
-
-cd voxd && ./setup.sh
-
-# requires sudo for packages & REBOOT (ydotool setup on Wayland systems). Launchers (GUI, Tray, Flux) are installed automatically.
-```
-
-Setup is non-interactive with minimal console output; a detailed setup log is saved in the repo directory (e.g. `2025-09-18-setup-log.txt`).
-
-**Reboot** the system!  
-(unless on an X11 system; on most modern systems there is Wayland, so **ydotool** is required for typing and needs rebooting for user setup).  
-
-### 2. **Setup a global hotkey** shortcut  in your system, for recording/stop:  
-a. Open your system keyboard-shortcuts panel:  
-  - *GNOME:* Settings → Keyboard → "Custom Shortcuts"  
-  - *KDE / XFCE / Cinnamon:* similar path.  
-  - *Hyprland / Sway:* just add a keybinding in the respective config file.  
-
-b. **The command** to assign to the shortcut hotkey (EXACTLY as given):  
-
-`bash -c 'voxd --trigger-record'`  
-
-c. Click **Add / Save**.  
-
-First, run the app in terminal via just  
-`voxd` or `voxd --setup` command.  
-The first run will do some initial setup (voice model, LLM model for AIPP, ydotool user setup).  
-
-### <span style="color:#FF4500">READY! → Go type anywhere with your voice!</span>  
-
-
----
-
-## Usage
-
-### Use the installed VOXD launchers (your app launcher) or launch via Terminal, in any mode:
-```bash
-voxd        # CLI (interactive); 'h' shows commands inside CLI. FIRST RUN: a necessary initial setup.
-voxd --rh   # directly starts hotkey-controlled continuous recording in Terminal
-voxd -h     # show top-level help and quick-actions
-voxd --gui  # friendly GUI window--just leave it in the background to voice-type via your hotkey
-voxd --tray # sits in the tray; perfect for unobstructed dictation (hotkey-driven also)
-voxd --flux # VAD (Voice Activity Detection), voice-triggered continuous dictation (in beta)
-```
-
-Leave VOXD running in the background -> go to any app where you want to voice-type and:  
-
-| Press hotkey …   | VOXD does …                                                 |
-| ---------------- | ----------------------------------------------------------- |
-| **First press**  | start recording                                             |
-| **Second press** | stop ⇢ [transcribe ⇢ copy to clipboard] ⇢ types the output into any focused app |  
-
-Otherwise, if in --flux (beta), **just speak**.
-
-### Autostart 
-For practical reasons (always ready to type & low system footprint), it is advised to enable voxd user daemon:
-
-- Enable: `voxd --autostart true`
-- Disable: `voxd --autostart false`
-
-This launches `voxd --tray` automatically after user login using systemd user services when available; otherwise it falls back to an XDG Autostart entry (`~/.config/autostart/voxd-tray.desktop`).
-
-### Languages
-
-- **Supported codes**: ISO 639-1 (e.g., `en`, `es`, `de`, `sv`) and `auto` (auto-detect, not advised).
-- **Default**: `en`. You can override per run or persist it.
-- **Change via CLI (session-only)**, examples:
-```bash
-voxd --gui  --lang auto
-voxd --tray --lang es
-voxd --flux --lang de
-voxd --rh   --lang sv
-```
-- **Persist via CLI**: `voxd --cfg` opens the config file for editing. Set:
-```yaml
-# ~/.config/voxd/config.yaml
-language: sv  # or 'auto', 'es', etc.
-```
-- **Change via GUI/Tray (persisted)**: Menu → **Language**. Saved to `~/.config/voxd/config.yaml` as `language`.
-- **Model note**: For non‑English languages, use a multilingual Whisper model (not `*.en.bin`). Install/switch via GUI “Whisper Models” or `voxd-model` (e.g., `ggml-base.bin`, `small`, `medium`, `large-v3`).
-- **Tip**: `auto` works well, but setting the exact language can improve accuracy. If you pick a non‑English language while using an English‑only model, VOXD will warn and transcription quality may drop.
-
-
-### 🎙️  Managing speech models
-
-VOXD needs a Whisper GGML model file. There is one default model readily setup in the app (base.en).  
-Use the built-in model-manager in GUI mode or via CLI mode in Terminal to fetch any other model.  
-The voice models are downloaded into ~/.local/share/voxd/models/ and VOXD app will
-automatically have them visible.
-
-CLI model management examples:
-```bash
-voxd-model list	# show models already on disk
-voxd-model install tiny.en  #	download another model
-voxd-model --no-check install base.en # download a model and skip SHA-1 verification
-voxd-model remove tiny.en	# delete a model
-voxd-model use tiny.en	# make that model the default (edits config.yaml)
-```
-
-Models for download (size MB):
-
-| Model | Size (MB) | Filename |
-|-------|----------:|----------|
-| tiny | 75 | ggml-tiny.bin |
-| tiny-q5_1 | 31 | ggml-tiny-q5_1.bin |
-| tiny-q8_0 | 42 | ggml-tiny-q8_0.bin |
-| tiny.en | 75 | ggml-tiny.en.bin |
-| tiny.en-q5_1 | 31 | ggml-tiny.en-q5_1.bin |
-| tiny.en-q8_0 | 42 | ggml-tiny.en-q8_0.bin |
-| base | 142 | ggml-base.bin |
-| base-q5_1 | 57 | ggml-base-q5_1.bin |
-| base-q8_0 | 78 | ggml-base-q8_0.bin |
-| base.en | 142 | ggml-base.en.bin |
-| base.en-q5_1 | 57 | ggml-base.en-q5_1.bin |
-| base.en-q8_0 | 78 | ggml-base.en-q8_0.bin |
-| small | 466 | ggml-small.bin |
-| small-q5_1 | 181 | ggml-small-q5_1.bin |
-| small-q8_0 | 252 | ggml-small-q8_0.bin |
-| small.en | 466 | ggml-small.en.bin |
-| small.en-q5_1 | 181 | ggml-small.en-q5_1.bin |
-| small.en-q8_0 | 252 | ggml-small.en-q8_0.bin |
-| small.en-tdrz | 465 | ggml-small.en-tdrz.bin |
-| medium | 1500 | ggml-medium.bin |
-| medium-q5_0 | 514 | ggml-medium-q5_0.bin |
-| medium-q8_0 | 785 | ggml-medium-q8_0.bin |
-| medium.en | 1500 | ggml-medium.en.bin |
-| medium.en-q5_0 | 514 | ggml-medium.en-q5_0.bin |
-| medium.en-q8_0 | 785 | ggml-medium.en-q8_0.bin |
-| large-v1 | 2900 | ggml-large-v1.bin |
-| large-v2 | 2900 | ggml-large-v2.bin |
-| large-v2-q5_0 | 1100 | ggml-large-v2-q5_0.bin |
-| large-v2-q8_0 | 1500 | ggml-large-v2-q8_0.bin |
-| large-v3 | 2900 | ggml-large-v3.bin |
-| large-v3-q5_0 | 1100 | ggml-large-v3-q5_0.bin |
-| large-v3-turbo | 1500 | ggml-large-v3-turbo.bin |
-| large-v3-turbo-q5_0 | 547 | ggml-large-v3-turbo-q5_0.bin |
-| large-v3-turbo-q8_0 | 834 | ggml-large-v3-turbo-q8_0.bin |
-
----
-
-## ⚙️ User Config
-
-Available in GUI and TRAY modes ("Settings"), but directly here:
-`~/.config/voxd/config.yaml`
-
----
-
-## 🧠 AI Post-Processing (AIPP)
-Your spoken words can be magically cleaned and rendered into e.g. neatly formated email, a poem, or straight away into a programing code!  
-
-VOXD can optionally post-process your transcripts using LOCAL (on-machine, **llama.cpp**, **Ollama**) or cloud LLMs (like **OpenAI, Anthropic, or xAI**).  
-For the local AIPP, **llama.cpp** is available out-of-the-box, with a default model.  
-You can also **[install Ollama](https://ollama.ai)** and download a model that can be run on your machine, e.g. `ollama pull gemma3:latest`.   
-You can enable, configure, and manage prompts directly from the GUI.
-
-### Enable AIPP:
-In CLI mode, use `--aipp` argument.  
-In GUI or TRAY mode, all relevant settings are in: "*AI Post-Processing*".  
-**Seleting provider & model** - models are tied to their respective providers!  
-**Editing Prompts** - Select "*Manage prompts*" or "*Prompts*" to edit up to 4 of them.
-
-## Supported providers:
-
-- **llama.cpp** (local)
-- **Ollama** (local)  
-- **OpenAI**  
-- **Anthropic**  
-- **xAI**  
-
----
-
-### AIPP Model Management
-
-#### **Model Storage**
-```
-~/.local/share/voxd/llamacpp_models/
-```
-
-#### **Adding Models | Requirements**
-
-
-- **GGUF** format **only** (`.gguf` extension)
-- **Quantized models recommended** (Q4_0, Q4_1, Q5_0, etc.)
-- ❌ **Not supported:** PyTorch (`.pth`), Safetensors (`.safetensors`), ONNX
-
-**Step 1:** Download a `.gguf` model from [Hugging Face](https://huggingface.co/models?search=gguf)
-```bash
-# Example: Download to model directory
-cd ~/.local/share/voxd/llamacpp_models/
-wget https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf?download=true
-```
-
-**Step 2:** Restart VOXD  
-VOXD automatically discovers all `.gguf` files in the models directory on startup and makes them available for selection.
-
-**Step 3:** Select in VOXD GUI  
-*AI Post-Processing → Provider: `llamacpp_server` → Model: `qwen2.5-3b-instruct`*
-
-#### **Recommended Models for AIPP**
-
-| Model | Size | RAM | Quality | Best For |
-|-------|------|-----|---------|----------|
-| **qwen2.5-3b-instruct** | 1.9GB | 3GB | Great | Default, high quality |
-| **qwen2.5-coder-1.5b** | 900MB | 2GB | Good | Code-focused tasks |
-
-
-### 🔧 Advanced Configuration
-
-Edit `~/.config/voxd/config.yaml`:
+The user config is `~/.config/voxd/config.yaml`. Important defaults:
 
 ```yaml
-# llama.cpp settings
-llamacpp_server_path: "llama.cpp/build/bin/llama-server"
-llamacpp_server_url: "http://localhost:8080"
-llamacpp_server_timeout: 30
-
-# Selected models per provider (automatically updated by VOXD)
-aipp_selected_models:
-  llamacpp_server: "qwen2.5-3b-instruct-q4_k_m"
+gemma_server_url: http://localhost:9292
+gemma_model: gemma-e4b
+gemma_segment_seconds: 25
+gemma_segment_overlap_seconds: 1
+gemma_timeout: 300
+record_chunk_seconds: 300
+typing_delay: 1
+typing_start_delay: 0.15
 ```
 
----
+`record_chunk_seconds` controls on-disk chunk rotation, not maximum speech length.
+The E4B service should stay warm for low latency; VOXD does not own or restart it.
 
-### 🔑 Setting API Keys for the remote API providers
-
-For security reasons, be mindful where you store your API keys.  
-To use cloud AI providers, set the required API key(s) in your shell environment before running VOXD.  
-For example, add these lines to your `.bashrc`, `.zshrc`, or equivalent shell profile for convenience (change to your exact key accordingly):
-
-```sh
-# For OpenAI
-export OPENAI_API_KEY="sk-..."
-
-# For Anthropic
-export ANTHROPIC_API_KEY="..."
-
-# For xAI
-export XAI_API_KEY="..."
-```
-
-**Note:**  
-If an API key is missing, the respective cloud-based AIPP provider will (surprise, surprise) not work.
-
----
-
-## 🩺 Troubleshooting cheatsheet
-
-Note: As one may expect, the app is not completely immune to very noisy environments :) especially if you are not the best speaker out there.  
-
-| Symptom                            | Likely cause / fix                                                                                             |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| *Getting randomly [BLANK_AUDIO], no transcript, or very poor transcript*    | Most likely: too high mic volume (clipping & distortions) VOXD will try to set your microphone optimally (configurable), but anyway check if input volume is not > 45%.
-| *Press hotkey, nothing happens*    | Troubleshoot with this command: `gnome-terminal -- bash -c "voxd --trigger-record; read -p 'Press Enter...'"` |
-| *Transcript printed but not typed* | Wayland: `ydotool` not installed or user not in `input` group → run `setup_ydotool.sh`, relog.                 |
-| *"whisper-cli not found"*          | Build failed - rerun `./setup.sh` and check any diagnostic output.                                                      |
-| *Mic not recording*                | Verify in system settings: **input device available**? / **active**? / **not muted**?                                        |
-| Clipboard empty                    | ensure `xclip` or `wl-copy`  present (re-run `setup.sh`).                                |
-
-### Audio troubleshooting
-
-- List devices: `python -m sounddevice` (check that a device named "pulse" exists on modern systems).
-- Prefer PulseAudio/PipeWire: set in `~/.config/voxd/config.yaml`:
-
-```yaml
-audio_prefer_pulse: true
-audio_input_device: "pulse"   # or a specific device name or index
-```
-
-- If no `pulse` device:
-  - Debian/Ubuntu: `sudo apt install alsa-plugins pavucontrol` (ensure `pulseaudio` or `pipewire-pulse` is active)
-  - Fedora/openSUSE: `sudo dnf install alsa-plugins-pulseaudio pavucontrol` (ensure `pipewire-pulseaudio` is active)
-  - Arch: `sudo pacman -S alsa-plugins pipewire-pulse pavucontrol`
-
-- If 16 kHz fails on ALSA: VOXD will retry with the device default rate and with `pulse` when available.
-
----
-
-## 📜 License & Credits
-
-* VOXD – © 2025 Jakov Ivkovic – **MIT** license (see [`LICENSE`](LICENSE)). Logo and brand assets: see [`ASSETS_LICENSE`](ASSETS_LICENSE). Trademarks: see [`TRADEMARKS.md`](TRADEMARKS.md).
-* Speech engine powered by [**ggml-org/whisper.cpp**](https://github.com/ggml-org/whisper.cpp) (MIT) and OpenAI Whisper models (MIT).
-* Auto-typing/pasting powered by [**ReimuNotMoe/ydotool**](https://github.com/ReimuNotMoe/ydotool) (AGPLv3).
-* Transcript post-processing powered by [**ggml-org/llama.cpp**](https://github.com/ggml-org/llama.cpp) (MIT)
-
----
-
-## 🗑️  Removal / Uninstall
-
-
-### 1. Package install (deb/rpm/arch)
-If VOXD was installed via a native package:
-
-- **Ubuntu/Debian**
-```bash
-sudo apt remove voxd
-```
-
-- **Fedora**
-```bash
-sudo dnf remove -y voxd
-```
-
-- **openSUSE**
-```bash
-sudo zypper --non-interactive remove voxd
-```
-
-- **Arch**
-```bash
-sudo pacman -R voxd
-```
-
-Note: This removes system files (e.g., under `/opt/voxd` and `/usr/bin/voxd`). User-level data (models, config, logs) remain. See "Optional runtime clean-up" below to remove those.
-
-
-
-### 2. Repo-clone install (`./setup.sh`)
-If you cloned this repository and ran `./setup.sh` inside it, just run the uninstall.sh script in the repo folder:
+Useful commands:
 
 ```bash
-# From inside the repo folder
-./uninstall.sh
+voxd --diagnose
+voxd --autostart true
+voxd --autostart false
+voxd --version
 ```
 
-
-### 3. pipx install
-If voxd was installed through **pipx** (either directly or via the prompt at the end of `setup.sh`):
+If typing fails, verify `ydotool` and its socket:
 
 ```bash
-pipx uninstall voxd
+systemctl --user status ydotoold.service
+voxd --diagnose
 ```
-
----
-
-Enjoy seamless voice-typing on Linux - and if you build something cool on top, open a PR or say hi!

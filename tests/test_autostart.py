@@ -39,13 +39,14 @@ def test_autostart_xdg_fallback_enable_disable(monkeypatch, tmp_path):
             return t
         return types.SimpleNamespace(returncode=1, stdout=b"", stderr=b"")
 
-    monkeypatch.setattr(main_mod, "subprocess", types.SimpleNamespace(run=fake_run))
+    monkeypatch.setattr(main_mod.subprocess, "run", fake_run)
 
     rc_en = main_mod._handle_autostart("true")
     assert rc_en == 0
     xdg_path = (tmp_path / ".config" / "autostart" / "voxd-tray.desktop")
     assert xdg_path.exists()
-    assert "Exec=voxd --tray" in xdg_path.read_text()
+    assert "Exec=" in xdg_path.read_text()
+    assert "--tray" in xdg_path.read_text()
 
     rc_dis = main_mod._handle_autostart("false")
     assert rc_dis == 0
@@ -85,7 +86,7 @@ def test_autostart_systemd_enable_disable(monkeypatch, tmp_path):
             return types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
         return types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
 
-    monkeypatch.setattr(main_mod, "subprocess", types.SimpleNamespace(run=fake_run))
+    monkeypatch.setattr(main_mod.subprocess, "run", fake_run)
 
     rc_en = main_mod._handle_autostart("true")
     assert rc_en == 0
@@ -94,3 +95,20 @@ def test_autostart_systemd_enable_disable(monkeypatch, tmp_path):
     assert rc_dis == 0
 
 
+def test_systemd_autostart_removes_xdg_fallback(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    import voxd.__main__ as main_mod
+
+    fallback = tmp_path / ".config/autostart/voxd-tray.desktop"
+    fallback.parent.mkdir(parents=True)
+    fallback.write_text("stale")
+    monkeypatch.setattr(main_mod, "_systemd_user_available", lambda: True)
+    monkeypatch.setattr(main_mod, "_ensure_voxd_tray_unit", lambda: None)
+    monkeypatch.setattr(
+        main_mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(returncode=0),
+    )
+
+    assert main_mod._handle_autostart("true") == 0
+    assert not fallback.exists()

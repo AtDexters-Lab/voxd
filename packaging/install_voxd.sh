@@ -15,13 +15,10 @@ PKG_PATH="${1:-}"
 
 # Try to auto-detect the package file if not provided
 if [[ -z "$PKG_PATH" ]]; then
-  if compgen -G "voxd_*_*.deb" > /dev/null; then
-    PKG_PATH="$(ls -1 voxd_*_*.deb | head -n1)"
-  elif compgen -G "voxd-*-*.rpm" > /dev/null; then
-    PKG_PATH="$(ls -1 voxd-*-*.rpm | head -n1)"
-  elif compgen -G "voxd-*-*.pkg.tar.zst" > /dev/null; then
-    PKG_PATH="$(ls -1 voxd-*-*.pkg.tar.zst | head -n1)"
-  fi
+  shopt -s nullglob
+  packages=(voxd_*_*.deb voxd-*-*.rpm voxd-*-*.pkg.tar.zst)
+  PKG_PATH="${packages[0]:-}"
+  shopt -u nullglob
 fi
 
 if [[ -z "$PKG_PATH" ]]; then
@@ -86,5 +83,4 @@ case "$DISTRO" in
 esac
 
 info "Install complete. Run 'voxd' to start; first run performs per-user setup."
-
 

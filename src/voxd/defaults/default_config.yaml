@@ -1,31 +1,16 @@
-log_enabled: true
-log_location: ''
-perf_collect: false
-perf_accuracy_rating_collect: true
-typing: true
-typing_delay: 1
-typing_start_delay: 0.15
-ctrl_v_paste: false  # Use Ctrl+V instead of default Ctrl+Shift+V
-append_trailing_space: true
 verbosity: false
 autostart: false
-record_chunked: true
+
+typing_delay: 1
+typing_start_delay: 0.15
+append_trailing_space: true
+
 record_chunk_seconds: 300
-audio_preproc_enabled: true
-audio_peak_dbfs: -3.0
-audio_clip_warn_threshold: 0.01
-# Audio device preferences
 audio_prefer_pulse: true
 audio_input_device: ""
-# Mic autoset (best-effort; uses wpctl/pactl/amixer if present)
 mic_autoset_enabled: true
 mic_autoset_level: 0.45
-whisper_binary: whisper.cpp/build/bin/whisper-cli
-whisper_model_path: whisper.cpp/models/ggml-base.en.bin
-language: en
 
-# Gemma audio transcription (tray/hotkey MVP; set to whisper for rollback)
-transcription_backend: gemma
 gemma_server_url: http://localhost:9292
 gemma_model: gemma-e4b
 gemma_timeout: 300
@@ -40,67 +25,3 @@ gemma_transcription_prompt: >-
   thoughts with periods, use question marks for questions, and add commas where
   natural. Do not paraphrase or change the spoken wording. Return only the
   transcription, with no commentary.
-
-# --- Flux (VAD-driven continuous dictation) ---------------------------------
-flux_min_silence_ms: 500     # pause to finalize an utterance
-flux_min_speech_ms: 200      # minimum speech before opening a segment
-flux_pre_roll_ms: 180        # prepend audio before detection
-# Flux VAD (single backend)
-flux_energy_start_margin_db: 6.0
-flux_energy_keep_margin_db: 3.0
-flux_energy_abs_start_db: -33.0
-flux_energy_abs_keep_db: -37.0
-flux_energy_use_absolute: false
-flux_energy_start_p: 0.55
-flux_energy_keep_p: 0.50
-# Legacy hysteresis thresholds (unused, kept for compatibility)
-flux_start_threshold: 0.6
-flux_end_threshold: 0.4
-flux_post_roll_ms: 150
-flux_min_segment_ms: 600
-flux_cooldown_ms: 250
-flux_min_rms_dbfs: -45.0
-
-# Monitor and calibration
-flux_monitor_enabled: true
-flux_monitor_energy_window_s: 10
-flux_monitor_spectrum_floor_db: -85.0
-flux_calibration_sec: 5
-flux_noise_ema: 0.05
-flux_noise_spec_ema: 0.02
-flux_noise_subtract_enabled: true
-
-# --- ✨ AIPP (AI post-processing) ------------------------------------------
-aipp_enabled: false
-aipp_provider: llamacpp_server
-aipp_active_prompt: default
-
-# List of models per provider
-aipp_models:
-  llamacpp_server: ["qwen2.5-3b-instruct-q4_k_m"]
-  ollama: ["llama3.2:latest", "mistral:latest", "gemma3:latest", "qwen2.5-coder:1.5b"]
-  openai: ["gpt-4o-mini-2024-07-18"]
-  anthropic: ["claude-3-opus-20240229", "claude-3-haiku"]
-  xai: ["grok-3-latest"]
-
-# Selected model per provider
-aipp_selected_models:
-  llamacpp_server: "qwen2.5-3b-instruct-q4_k_m"
-  ollama: "llama3.2:latest"
-  openai: "gpt-4o-mini-2024-07-18"
-  anthropic: "claude-3-opus-20240229"
-  xai: "grok-3-latest"
-
-# llama.cpp settings
-llamacpp_server_path: "llama.cpp/build/bin/llama-server"
-llamacpp_cli_path: "llama.cpp/build/bin/llama-cli"
-llamacpp_default_model: "llamacpp_models/qwen2.5-3b-instruct-q4_k_m.gguf"
-llamacpp_server_url: "http://localhost:8080"
-llamacpp_server_timeout: 30
-
-
-aipp_prompts:
-  default: "Rewrite the following input so that it is clean and concise. Do not add any additional text or commentary. Just the rewritten text."
-  prompt1: "Interpret the following text to the best of your ability as a C programming language code and output it as such. Do not add any additional text or commentary. Just the corresponding C code."
-  prompt2: "Interpret the following text to the best of your ability as a Python programming language code and output it as such. Do not add any additional text or commentary. Just the corresponding Python code."
-  prompt3: "Rewrite the following text as a three-verse poem."

@@ -1,10 +1,12 @@
+import os
 import socket
 import threading
 import time
-from pathlib import Path
+
+from voxd.paths import CONFIG_DIR
 
 def _socket_path():
-    return Path.home() / ".config" / "voxd" / "voxd.sock"
+    return CONFIG_DIR / "voxd.sock"
 
 # Minimum interval between accepted trigger_record messages (seconds).
 # Prevents keyboard auto-repeat on the hotkey from spawning duplicate
@@ -16,10 +18,20 @@ def start_ipc_server(trigger_callback):
     sock_path = _socket_path()
     sock_path.parent.mkdir(parents=True, exist_ok=True)
     if sock_path.exists():
-        sock_path.unlink()
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.settimeout(0.25)
+            probe.connect(str(sock_path))
+        except OSError:
+            sock_path.unlink()
+        else:
+            raise RuntimeError("another VOXD tray is already running")
+        finally:
+            probe.close()
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(str(sock_path))
+    os.chmod(sock_path, 0o600)
     server.listen()
 
     last_trigger = 0.0
@@ -30,7 +42,11 @@ def start_ipc_server(trigger_callback):
         while True:
             conn, _ = server.accept()
             try:
-                data = conn.recv(1024).strip()
+                conn.settimeout(1.0)
+                try:
+                    data = conn.recv(1024).strip()
+                except OSError:
+                    continue
                 if data == b"trigger_record":
                     fire = False
                     with lock:

@@ -1,28 +1,44 @@
 from types import SimpleNamespace
 
 
-def test_core_process_uses_gemma_and_types_final_text(monkeypatch, tmp_path):
+def _config():
+    return SimpleNamespace(
+        gemma_server_url="http://localhost:9292",
+        gemma_model="gemma-e4b",
+        gemma_transcription_prompt="Romanized Hindi",
+        gemma_segment_seconds=25,
+        gemma_segment_overlap_seconds=1,
+        gemma_timeout=300,
+        gemma_max_tokens=1024,
+        record_chunk_seconds=300,
+        audio_input_device="",
+        audio_prefer_pulse=True,
+        typing_delay=2,
+        typing_start_delay=0,
+        data={"append_trailing_space": True},
+    )
+
+
+def _install_fakes(monkeypatch, tmp_path, *, clipboard_error=None):
     import voxd.core.clipboard as clipboard_module
-    import voxd.core.gemma_transcriber as gemma_module
     import voxd.core.recorder as recorder_module
     import voxd.core.typer as typer_module
-    from voxd.core.voxd_core import CoreProcessThread
+    import voxd.core.voxd_core as core_module
 
-    events = {
-        "transcriber_kwargs": None,
-        "typed": [],
-        "copied": [],
-        "logged": [],
-        "finished": [],
-    }
+    events = {"transcriber_kwargs": None, "typed": [], "copied": []}
     recording_path = tmp_path / "recording.wav"
 
     class FakeRecorder:
+        def __init__(self, **kwargs):
+            assert kwargs["chunk_seconds"] == 300
+            self.is_recording = False
+
         def start_recording(self):
-            pass
+            self.is_recording = True
 
         def stop_recording(self, preserve=False):
             assert preserve is False
+            self.is_recording = False
             return recording_path
 
     class FakeTranscriber:
@@ -43,60 +59,42 @@ def test_core_process_uses_gemma_and_types_final_text(monkeypatch, tmp_path):
 
     class FakeClipboard:
         def copy(self, text):
+            if clipboard_error:
+                raise clipboard_error
             events["copied"].append(text)
 
-    class FakeLogger:
-        def log_entry(self, text):
-            events["logged"].append(text)
-
     monkeypatch.setattr(recorder_module, "AudioRecorder", FakeRecorder)
-    monkeypatch.setattr(gemma_module, "GemmaAudioTranscriber", FakeTranscriber)
-    monkeypatch.setattr(typer_module, "SimulatedTyper", FakeTyper)
+    monkeypatch.setattr(core_module, "GemmaAudioTranscriber", FakeTranscriber)
+    monkeypatch.setattr(typer_module, "YdotoolTyper", FakeTyper)
     monkeypatch.setattr(clipboard_module, "ClipboardManager", FakeClipboard)
+    return events
 
-    cfg = SimpleNamespace(
-        data={
-            "transcription_backend": "gemma",
-            "gemma_server_url": "http://localhost:9292",
-            "gemma_model": "gemma-e4b",
-            "gemma_transcription_prompt": "Romanized Hindi",
-            "gemma_segment_seconds": 25,
-            "gemma_segment_overlap_seconds": 1,
-            "gemma_timeout": 300,
-            "gemma_max_tokens": 1024,
-        },
-        typing=True,
-        typing_delay=2,
-        typing_start_delay=0,
-        aipp_enabled=True,
-        perf_collect=False,
-    )
 
-    thread = CoreProcessThread(cfg, FakeLogger())
+def test_core_process_uses_gemma_and_types_final_text(monkeypatch, tmp_path):
+    from voxd.core.voxd_core import CoreProcessThread
+
+    events = _install_fakes(monkeypatch, tmp_path)
+    finished = []
+    thread = CoreProcessThread(_config())
     thread.should_stop = True
-    thread.finished.connect(events["finished"].append)
+    thread.finished.connect(finished.append)
     thread.run()
 
     assert events["transcriber_kwargs"]["segment_seconds"] == 25
     assert events["typed"] == ["namaste doston"]
     assert events["copied"] == ["namaste doston"]
-    assert events["logged"] == ["namaste doston"]
-    assert events["finished"] == ["namaste doston"]
+    assert finished == ["namaste doston"]
 
 
-def test_core_process_rejects_unknown_transcription_backend(monkeypatch):
-    import voxd.core.recorder as recorder_module
+def test_clipboard_failure_does_not_block_real_typing(monkeypatch, tmp_path):
     from voxd.core.voxd_core import CoreProcessThread
 
-    class FakeRecorder:
-        pass
-
-    monkeypatch.setattr(recorder_module, "AudioRecorder", FakeRecorder)
-    cfg = SimpleNamespace(data={"transcription_backend": "gemmma"})
+    events = _install_fakes(monkeypatch, tmp_path, clipboard_error=RuntimeError("no clipboard"))
     finished = []
-
-    thread = CoreProcessThread(cfg, logger=None)
+    thread = CoreProcessThread(_config())
+    thread.should_stop = True
     thread.finished.connect(finished.append)
     thread.run()
 
-    assert finished == [""]
+    assert events["typed"] == ["namaste doston"]
+    assert finished == ["namaste doston"]

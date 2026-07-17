@@ -7,126 +7,75 @@ priority: optional
 license: MIT
 maintainer: "Jakov Ivkovic <jakov.iv@proton.me>"
 homepage: "https://github.com/jakovius/voxd"
-description: "VOXD - voice typing on Linux (CLI/GUI/Tray/Flux)"
+description: "VOXD - Gemma E4B voice typing on Linux"
 vendor: "VOXD"
 
 contents:
-  # Only ship the runtime sources under /opt/voxd/src (paths relative to repo root)
   - src: ./src
     dst: /opt/voxd/src
-
-  # Ship pyproject.toml so runtime can read version when metadata/git are absent
   - src: pyproject.toml
     dst: /opt/voxd/pyproject.toml
     file_info:
       mode: 0644
-
   - src: packaging/voxd.wrapper
     dst: /usr/bin/voxd
     file_info:
       mode: 0755
-
   - src: packaging/99-uinput.rules
     dst: /etc/udev/rules.d/99-uinput.rules
     file_info:
       mode: 0644
-
   - src: packaging/ydotoold.service
     dst: /usr/lib/systemd/user/ydotoold.service
     file_info:
       mode: 0644
-
   - src: packaging/voxd-tray.service
     dst: /usr/lib/systemd/user/voxd-tray.service
     file_info:
       mode: 0644
-
-  - src: packaging/voxd-ydotoold
-    dst: /usr/bin/voxd-ydotoold
-    file_info:
-      mode: 0755
-
 overrides:
   deb:
     depends:
-      - ffmpeg
-      - cmake
-      - curl
-      - xclip
-      - xsel
+      - ydotool
+      - ydotoold
       - wl-clipboard
-      - xdotool
       - python3-platformdirs
       - python3-venv
       - libportaudio2
       - python3-numpy
       - python3-requests
       - python3-yaml
-      - python3-psutil
       - python3-pyperclip
-      - python3-tqdm
       - python3-pyqt6
-      - python3-pyqtgraph
-      # python3-sounddevice not available on all Ubuntu versions; install via venv in postinstall
     recommends:
-      - ydotool
-      - pavucontrol
-      - alsa-plugins
-      - pulseaudio | pipewire-pulse
+      - pipewire-pulse | pulseaudio
   rpm:
     depends:
-      - cmake
-      - curl
-      - xclip
-      - xsel
+      - ydotool
       - wl-clipboard
-      - xdotool
       - python3-platformdirs
       - python3-virtualenv
       - portaudio
       - python3-numpy
       - python3-requests
       - python3-PyYAML
-      - python3-psutil
       - python3-pyperclip
-      - python3-tqdm
-      # sounddevice installed via venv in postinstall
-      # Note: On Fedora the ffmpeg package may require enabling RPM Fusion repository. 
-      # Note: On openSUSE the ffmpeg package (and other codecs) often come via the Packman repository. 
     suggests:
-      - ydotool
-      - ffmpeg
       - python3-qt6
-      - python3-pyqtgraph
-      - pavucontrol
-      # Fedora
-      - alsa-plugins-pipewire
       - pipewire-pulseaudio
-      # openSUSE
-      - alsa-plugins-pulse
   archlinux:
     depends:
-      - ffmpeg
-      - cmake
-      - curl
-      - xclip
-      - xsel
       - wl-clipboard
-      - xdotool
       - python-platformdirs
       - python-virtualenv
       - portaudio
       - python-numpy
       - python-requests
       - python-yaml
-      - python-psutil
       - python-pyperclip
-      - python-tqdm
       - python-pyqt6
-      - python-pyqtgraph
+      - ydotool
 
 scripts:
   postinstall: packaging/postinstall.sh
   postremove: packaging/postremove.sh
-
-

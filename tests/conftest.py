@@ -1,4 +1,3 @@
-import os
 import sys
 import importlib
 from pathlib import Path
@@ -29,6 +28,10 @@ def isolate_xdg_dirs(monkeypatch, tmp_path):
         importlib.reload(sys.modules["voxd.core.config"])  # type: ignore[arg-type]
     else:
         import voxd.core.config  # noqa: F401
+
+    for module_name in ("voxd.utils.ipc_client", "voxd.utils.ipc_server"):
+        if module_name in sys.modules:
+            importlib.reload(sys.modules[module_name])
 
     yield
 
@@ -116,27 +119,3 @@ def stub_pyperclip(monkeypatch):
     pc.copy = copy
     monkeypatch.setitem(sys.modules, "pyperclip", pc)
     yield
-
-
-@pytest.fixture
-def fake_whisper_run(monkeypatch, tmp_path):
-    """Patch whisper subprocess.run to simulate success and create expected .txt output."""
-    def _run(cmd, capture_output=True, text=True):
-        # Find output prefix from '-of'
-        if "-of" in cmd:
-            of_idx = cmd.index("-of")
-            prefix = cmd[of_idx + 1]
-            out_txt = f"{prefix}.txt"
-            Path(out_txt).parent.mkdir(parents=True, exist_ok=True)
-            with open(out_txt, "w", encoding="utf-8") as f:
-                f.write("[00:00.000] Hello world\n")
-        class CP:
-            returncode = 0
-            stdout = ""
-            stderr = ""
-        return CP()
-
-    monkeypatch.setattr("voxd.core.transcriber.subprocess.run", _run)
-    return _run
-
-

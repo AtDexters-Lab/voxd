@@ -6,10 +6,6 @@ __pycache__/
 # C extensions
 *.so
 
-# whisper.cpp & llama.cpp
-whisper.cpp
-llama.cpp
-
 # text logs
 *log.txt
 
@@ -182,7 +178,3 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-
-# any whisper.cpp build cache
-.whisper.cpp/
-**/whisper.cpp/build/

@@ -1,202 +1,225 @@
-import sounddevice as sd
-import numpy as np
+from __future__ import annotations
+
 import wave
 from datetime import datetime
 from pathlib import Path
-import tempfile
+
+import numpy as np
+import sounddevice as sd
+
+from voxd.paths import DATA_DIR, RECORDINGS_DIR
 from voxd.utils.libw import verbo, verr
 
 
 class AudioRecorder:
-    def __init__(self, samplerate=16000, channels=1, *, record_chunked: bool | None = None, chunk_seconds: int | None = None):
-        from voxd.core.config import AppConfig
-        cfg = AppConfig()
-        self.fs = samplerate
-        self.channels = channels
-        self.recording = []
+    """Stream microphone PCM to bounded temporary WAV chunks."""
+
+    def __init__(
+        self,
+        *,
+        samplerate: int = 16000,
+        channels: int = 1,
+        chunk_seconds: int = 300,
+        input_device: str = "",
+        prefer_pulse: bool = True,
+    ):
+        self.fs = int(samplerate)
+        self.channels = int(channels)
+        self.chunk_seconds = int(chunk_seconds)
+        self.input_device = input_device
+        self.prefer_pulse = prefer_pulse
+        self.temp_dir = DATA_DIR / "temp"
+        self.temp_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+        self.temp_dir.chmod(0o700)
         self.is_recording = False
-        self.temp_dir = Path(tempfile.gettempdir()) / "voxd_temp"
-        self.temp_dir.mkdir(exist_ok=True)
-        self.last_temp_file = None
-        # Chunking configuration
-        self.record_chunked = cfg.data.get("record_chunked", True) if record_chunked is None else record_chunked
-        self.chunk_seconds = cfg.data.get("record_chunk_seconds", 300) if chunk_seconds is None else int(chunk_seconds)
+        self.last_temp_file: Path | None = None
+        self.stream = None
         self._chunk_wave = None
         self._chunk_index = 0
         self._chunk_written_frames = 0
         self._chunk_target_frames = self.chunk_seconds * self.fs
         self._chunk_paths: list[Path] = []
+        self._write_error: Exception | None = None
 
-    def _timestamped_filename(self):
-        dt = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return f"{dt}_recording.wav"
+    def start_recording(self) -> None:
+        verbo("[recorder] Recording started")
+        self._discard_chunks()
+        self._write_error = None
+        self._open_new_chunk()
 
-    def start_recording(self):
-        verbo("[recorder] Recording started...")
-        self.is_recording = True
-        self.recording = []
-        self._chunk_paths = []
-        self._chunk_index = 0
-        self._chunk_written_frames = 0
-        if self.record_chunked:
-            self._open_new_chunk()
+        preferred = self.input_device or ("pulse" if self.prefer_pulse else None)
 
-        # Prefer configured device or PulseAudio on Linux
         try:
-            from voxd.core.config import AppConfig
-            cfg = AppConfig()
-            dev_pref = cfg.data.get("audio_input_device") or ("pulse" if cfg.data.get("audio_prefer_pulse", True) else None)
+            self._start_stream(preferred, self.fs)
+            self.is_recording = True
+            return
+        except Exception as exc:
+            verr(
+                f"[recorder] Opening input at {self.fs} Hz failed ({exc}); "
+                "trying the device default"
+            )
+
+        fallback_fs = self._default_sample_rate(preferred)
+        self.fs = fallback_fs
+        self._chunk_target_frames = self.chunk_seconds * self.fs
+        self._discard_chunks()
+        self._open_new_chunk()
+
+        candidates = []
+        if preferred != "pulse":
+            candidates.append("pulse")
+        candidates.append(None)
+        last_error = None
+        for device in candidates:
+            try:
+                self._start_stream(device, self.fs)
+                self.is_recording = True
+                return
+            except Exception as exc:
+                last_error = exc
+
+        self.is_recording = False
+        self._discard_chunks()
+        raise RuntimeError(f"could not open an audio input stream: {last_error}")
+
+    def _start_stream(self, device, sample_rate) -> None:
+        stream = self._open_stream(device, sample_rate)
+        try:
+            stream.start()
         except Exception:
-            dev_pref = "pulse"
+            try:
+                stream.close()
+            except Exception:
+                pass
+            raise
+        self.stream = stream
 
-        def callback(indata, frames, time, status):
-            if status:
-                verbo(f"[recorder] Warning: {status}")
-            if self.record_chunked:
-                try:
-                    x = np.clip(indata.copy(), -1.0, 1.0)
-                    pcm = (x * 32767.0).astype(np.int16).tobytes()
-                    self._chunk_wave.writeframes(pcm)
-                    self._chunk_written_frames += frames
-                    # Rotate chunk if needed
-                    if self._chunk_written_frames >= self._chunk_target_frames:
-                        self._chunk_wave.close()
-                        self._chunk_wave = None
-                        self._chunk_written_frames = 0
-                        self._open_new_chunk()
-                except Exception as e:
-                    verr(f"[recorder] Chunk write failed: {e}")
-            else:
-                self.recording.append(indata.copy())
+    def _open_stream(self, device, sample_rate):
+        kwargs = {
+            "samplerate": sample_rate,
+            "channels": self.channels,
+            "callback": self._audio_callback,
+        }
+        if device:
+            kwargs["device"] = device
+        return sd.InputStream(**kwargs)
 
-        # Helper to open stream with optional device and samplerate
-        def _open(device, fs):
-            kw = {"samplerate": fs, "channels": self.channels, "callback": callback}
-            if device:
-                kw["device"] = device
-            return sd.InputStream(**kw)
-
-        # Try preferred sample rate on preferred device; then robust fallbacks
-        tried_pulse = False
+    def _default_sample_rate(self, device) -> int:
         try:
-            self.stream = _open(dev_pref, self.fs)
-            self.stream.start()
-        except Exception as e:
-            verr(f"[recorder] Opening stream at {self.fs} Hz failed ({e}); trying device default rate")
-            # Determine device default samplerate
-            try:
-                indev = dev_pref if dev_pref else (sd.default.device[0] if sd.default.device else None)
-            except Exception:
-                indev = None
-            try:
-                info = sd.query_devices(indev, 'input') if indev is not None else sd.query_devices(kind='input')
-                fallback_fs = int(info.get('default_samplerate') or 48000)
-            except Exception:
-                fallback_fs = 48000
-            self.fs = fallback_fs
-            self._chunk_target_frames = self.chunk_seconds * self.fs
-            if self.record_chunked and self._chunk_wave is not None:
-                try:
-                    self._chunk_wave.close()
-                except Exception:
-                    pass
-                self._open_new_chunk()
-            # If not yet tried, attempt with pulse explicitly
-            if dev_pref != "pulse":
-                try:
-                    self.stream = _open("pulse", self.fs)
-                    self.stream.start()
-                    tried_pulse = True
-                    return
-                except Exception:
-                    tried_pulse = True
-                    pass
-            # Last resort: open without device hint
-            self.stream = _open(None, self.fs)
-            self.stream.start()
+            info = sd.query_devices(device, "input") if device else sd.query_devices(kind="input")
+            return int(info.get("default_samplerate") or 48000)
+        except Exception:
+            return 48000
 
-    def stop_recording(self, preserve=False):
+    def _audio_callback(self, indata, frames, _time, status) -> None:
+        if status:
+            verbo(f"[recorder] Warning: {status}")
+        if self._write_error is not None:
+            return
+        try:
+            pcm = (np.clip(indata.copy(), -1.0, 1.0) * 32767.0).astype(np.int16)
+            self._chunk_wave.writeframes(pcm.tobytes())
+            self._chunk_written_frames += frames
+            if self._chunk_written_frames >= self._chunk_target_frames:
+                self._close_chunk()
+                self._open_new_chunk()
+        except Exception as exc:
+            self._write_error = exc
+            verr(f"[recorder] Chunk write failed: {exc}")
+
+    def stop_recording(self, preserve: bool = False) -> Path | None:
         if not self.is_recording:
             return None
 
-        verbo("[recorder] Stopping recording...")
-        self.stream.stop()
-        self.stream.close()
-        self.is_recording = False
-
-        if self.record_chunked and self._chunk_wave is not None:
+        verbo("[recorder] Stopping recording")
+        stop_error = None
+        if self.stream is not None:
             try:
-                self._chunk_wave.close()
-            except Exception:
-                pass
-            self._chunk_wave = None
+                self.stream.stop()
+            except Exception as exc:
+                stop_error = exc
+            try:
+                self.stream.close()
+            except Exception as exc:
+                stop_error = stop_error or exc
+            self.stream = None
+        self.is_recording = False
+        self._close_chunk()
 
-        audio_data = None if self.record_chunked else np.concatenate(self.recording, axis=0)
-
-        from voxd.paths import RECORDINGS_DIR
-        if preserve:
-            rec_dir = RECORDINGS_DIR
-            rec_dir.mkdir(exist_ok=True)
-            output_path = rec_dir / self._timestamped_filename()
+        recording_error = self._write_error or stop_error
+        if preserve or recording_error:
+            output_path = RECORDINGS_DIR / self._timestamped_filename()
         else:
             output_path = self.temp_dir / "last_recording.wav"
-
-        if self.record_chunked:
-            self._stitch_chunks(output_path)
-        else:
-            self._save_wav(audio_data, output_path)
+        self._stitch_chunks(output_path)
         self.last_temp_file = output_path
-
         verbo(f"[recorder] Saved to {output_path}")
+        if recording_error:
+            raise RuntimeError(
+                f"audio capture failed; partial recording preserved at {output_path}: "
+                f"{recording_error}"
+            )
         return output_path
 
-    def _save_wav(self, data, path):
-        with wave.open(str(path), 'w') as wf:
-            wf.setnchannels(self.channels)
-            wf.setsampwidth(2)
-            wf.setframerate(self.fs)
-            x = np.clip(data, -1.0, 1.0)
-            wf.writeframes((x * 32767.0).astype(np.int16).tobytes())
+    def _timestamped_filename(self) -> str:
+        return f"{datetime.now():%Y%m%d_%H%M%S_%f}_recording.wav"
 
-    def _open_new_chunk(self):
+    def _open_new_chunk(self) -> None:
         self._chunk_index += 1
-        chunk_name = f"chunk_{self._chunk_index:04d}.wav"
-        chunk_path = self.temp_dir / chunk_name
-        self._chunk_paths.append(chunk_path)
-        self._chunk_wave = wave.open(str(chunk_path), 'w')
-        self._chunk_wave.setnchannels(self.channels)
-        self._chunk_wave.setsampwidth(2)
-        self._chunk_wave.setframerate(self.fs)
-        verbo(f"[recorder] Opened new chunk: {chunk_path}")
-
-    def _stitch_chunks(self, output_path: Path):
-        if not self._chunk_paths:
-            verr("[recorder] No chunks recorded; nothing to stitch.")
-            return
-        verbo(f"[recorder] Stitching {len(self._chunk_paths)} chunks → {output_path}")
+        self._chunk_written_frames = 0
+        chunk_path = self.temp_dir / f"chunk_{self._chunk_index:04d}.wav"
+        chunk_wave = wave.open(str(chunk_path), "wb")
+        chunk_path.chmod(0o600)
         try:
-            with wave.open(str(output_path), 'w') as out_wf:
-                out_wf.setnchannels(self.channels)
-                out_wf.setsampwidth(2)
-                out_wf.setframerate(self.fs)
-                for p in self._chunk_paths:
-                    with wave.open(str(p), 'r') as in_wf:
-                        frames = in_wf.readframes(in_wf.getnframes())
-                        out_wf.writeframes(frames)
-            # Cleanup chunks
-            for p in self._chunk_paths:
-                try:
-                    p.unlink()
-                except Exception:
-                    pass
-        except Exception as e:
-            verr(f"[recorder] Failed to stitch chunks: {e}")
+            chunk_wave.setnchannels(self.channels)
+            chunk_wave.setsampwidth(2)
+            chunk_wave.setframerate(self.fs)
+        except Exception:
+            chunk_wave.close()
+            try:
+                chunk_path.unlink()
+            except FileNotFoundError:
+                pass
             raise
-            
-    def get_last_temp_file(self):
-        return self.last_temp_file
+        self._chunk_paths.append(chunk_path)
+        self._chunk_wave = chunk_wave
 
-    def cleanup_temp(self):
+    def _close_chunk(self) -> None:
+        if self._chunk_wave is not None:
+            self._chunk_wave.close()
+            self._chunk_wave = None
+
+    def _discard_chunks(self) -> None:
+        self._close_chunk()
+        for path in self._chunk_paths:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        self._chunk_paths = []
+        self._chunk_index = 0
+        self._chunk_written_frames = 0
+
+    def _stitch_chunks(self, output_path: Path) -> None:
+        if not self._chunk_paths:
+            raise RuntimeError("no recorded audio chunks were produced")
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with wave.open(str(output_path), "wb") as destination:
+                destination.setnchannels(self.channels)
+                destination.setsampwidth(2)
+                destination.setframerate(self.fs)
+                for path in self._chunk_paths:
+                    with wave.open(str(path), "rb") as source:
+                        destination.writeframes(source.readframes(source.getnframes()))
+        except Exception:
+            # Preserve chunks for manual recovery when stitching fails.
+            raise
+        else:
+            output_path.chmod(0o600)
+            self._discard_chunks()
+
+    def cleanup_temp(self) -> None:
         if self.last_temp_file and self.last_temp_file.exists():
-            verbo(f"[recorder] Cleaning up temporary file {self.last_temp_file}")
             self.last_temp_file.unlink()
