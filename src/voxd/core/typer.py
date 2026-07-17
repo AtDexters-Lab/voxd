@@ -92,9 +92,11 @@ class YdotoolTyper:
     def _daemon_socket_ready(self) -> bool:
         if not self.socket_path.exists():
             return False
-        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        probe.settimeout(0.25)
+        # ydotoold uses a Unix datagram socket. A stream probe always fails
+        # with a protocol mismatch even while the daemon is healthy.
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         try:
+            probe.settimeout(0.25)
             probe.connect(str(self.socket_path))
             return True
         except OSError:

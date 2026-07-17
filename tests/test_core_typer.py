@@ -34,6 +34,34 @@ def test_custom_ydotool_socket_is_respected(monkeypatch):
     assert YdotoolTyper().socket_path == Path("/tmp/custom-ydotool.sock")
 
 
+def test_daemon_readiness_uses_ydotool_datagram_socket(monkeypatch, tmp_path):
+    import voxd.core.typer as typer_module
+
+    typer = _make_ydotool_typer()
+    typer.socket_path = tmp_path / "ydotool.sock"
+    typer.socket_path.touch()
+    socket_types = []
+
+    class FakeProbe:
+        def settimeout(self, _timeout):
+            pass
+
+        def connect(self, path):
+            assert path == str(typer.socket_path)
+
+        def close(self):
+            pass
+
+    def fake_socket(_family, socket_type):
+        socket_types.append(socket_type)
+        return FakeProbe()
+
+    monkeypatch.setattr(typer_module.socket, "socket", fake_socket)
+
+    assert typer._daemon_socket_ready() is True
+    assert socket_types == [typer_module.socket.SOCK_DGRAM]
+
+
 def test_ydotool_types_long_text_as_real_keystroke_chunks(monkeypatch):
     typer = _make_ydotool_typer()
     calls = []
