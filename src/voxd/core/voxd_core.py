@@ -30,7 +30,6 @@ class CoreProcessThread(QThread):
             transcriber = GemmaAudioTranscriber(
                 server_url=self.cfg.gemma_server_url,
                 model=self.cfg.gemma_model,
-                prompt=self.cfg.gemma_transcription_prompt,
                 segment_seconds=self.cfg.gemma_segment_seconds,
                 overlap_seconds=self.cfg.gemma_segment_overlap_seconds,
                 timeout=self.cfg.gemma_timeout,

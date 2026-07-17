@@ -10,9 +10,7 @@ def test_gemma_transcription_defaults():
     assert cfg.gemma_timeout == 300
     assert 0 < cfg.gemma_segment_seconds < 30
     assert cfg.gemma_segment_overlap_seconds < cfg.gemma_segment_seconds
-    assert "natural punctuation" in cfg.gemma_transcription_prompt
-    assert "question marks" in cfg.gemma_transcription_prompt
-    assert "exact spellings" not in cfg.gemma_transcription_prompt
+    assert "gemma_transcription_prompt" not in cfg.data
 
 
 def test_load_migrates_legacy_keys_out_of_config():

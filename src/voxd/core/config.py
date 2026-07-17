@@ -7,9 +7,6 @@ from pathlib import Path
 import yaml
 from platformdirs import user_config_dir
 
-from voxd.core.gemma_transcriber import DEFAULT_PROMPT
-
-
 DEFAULT_CONFIG = {
     "verbosity": False,
     "autostart": False,
@@ -27,7 +24,6 @@ DEFAULT_CONFIG = {
     "gemma_segment_seconds": 25,
     "gemma_segment_overlap_seconds": 1,
     "gemma_max_tokens": 1024,
-    "gemma_transcription_prompt": DEFAULT_PROMPT,
 }
 
 CONFIG_DIR = Path(user_config_dir("voxd"))
@@ -105,7 +101,6 @@ class AppConfig:
             "audio_input_device",
             "gemma_server_url",
             "gemma_model",
-            "gemma_transcription_prompt",
         ):
             if not isinstance(self.data[key], str) or not self.data[key].strip():
                 self.data[key] = DEFAULT_CONFIG[key]

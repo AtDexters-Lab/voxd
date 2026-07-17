@@ -5,7 +5,6 @@ def _config():
     return SimpleNamespace(
         gemma_server_url="http://localhost:9292",
         gemma_model="gemma-e4b",
-        gemma_transcription_prompt="Romanized Hindi",
         gemma_segment_seconds=25,
         gemma_segment_overlap_seconds=1,
         gemma_timeout=300,

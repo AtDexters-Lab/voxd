@@ -71,6 +71,7 @@ def test_gemma_segments_long_wav_and_merges_overlap(tmp_path):
         assert url == "http://localhost:9292/v1/chat/completions"
         assert timeout == 300
         assert payload["model"] == "gemma-e4b"
+        assert payload["chat_template_kwargs"] == {"enable_thinking": False}
         assert payload["messages"][0]["content"][0]["type"] == "text"
         audio_part = payload["messages"][0]["content"][1]
         assert audio_part["type"] == "input_audio"
@@ -103,6 +104,17 @@ def test_gemma_default_session_does_not_inherit_environment_proxies():
     transcriber = GemmaAudioTranscriber()
 
     assert transcriber.session.trust_env is False
+
+
+def test_default_prompt_is_scoped_computer_dictation_context():
+    from voxd.core.gemma_transcriber import DEFAULT_PROMPT
+
+    assert "live voice dictation on a computer" in DEFAULT_PROMPT
+    assert "coding tools" in DEFAULT_PROMPT
+    assert "web searches" in DEFAULT_PROMPT
+    assert "only to resolve likely words and sentence boundaries" in DEFAULT_PROMPT
+    assert "do not answer the speaker" in DEFAULT_PROMPT
+    assert "Infer readable punctuation" in DEFAULT_PROMPT
 
 
 def test_gemma_failure_retries_and_retains_audio(monkeypatch, tmp_path):
