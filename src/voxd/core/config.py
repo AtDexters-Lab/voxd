@@ -16,6 +16,8 @@ DEFAULT_CONFIG = {
     "record_chunk_seconds": 300,
     "audio_prefer_pulse": True,
     "audio_input_device": "",
+    "recording_archive_enabled": False,
+    "recording_archive_max_mb": 5120,
     "mic_autoset_enabled": True,
     "mic_autoset_level": 0.45,
     "gemma_server_url": "http://localhost:9292",
@@ -70,6 +72,9 @@ class AppConfig:
         self.data["record_chunk_seconds"] = int(
             self._number("record_chunk_seconds", minimum=30, maximum=3600)
         )
+        self.data["recording_archive_max_mb"] = int(
+            self._number("recording_archive_max_mb", minimum=100, maximum=1_000_000)
+        )
         self.data["mic_autoset_level"] = self._number(
             "mic_autoset_level", minimum=0, maximum=1
         )
@@ -92,6 +97,7 @@ class AppConfig:
             "autostart",
             "append_trailing_space",
             "audio_prefer_pulse",
+            "recording_archive_enabled",
             "mic_autoset_enabled",
         ):
             if not isinstance(self.data[key], bool):

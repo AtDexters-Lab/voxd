@@ -73,6 +73,8 @@ class GemmaAudioTranscriber:
         self.max_tokens = int(max_tokens)
         self.attempts = int(attempts)
         self.delete_input = delete_input
+        self.resolved_model: str | None = None
+        self.system_fingerprint: str | None = None
         if session is None:
             self.session = requests.Session()
             # Recorded audio targets a local service by default. Do not inherit
@@ -206,9 +208,14 @@ class GemmaAudioTranscriber:
                     timeout=self.timeout,
                 )
                 response.raise_for_status()
-                content = response.json()["choices"][0]["message"]["content"]
+                body = response.json()
+                content = body["choices"][0]["message"]["content"]
                 if not isinstance(content, str) or not content.strip():
                     raise ValueError("response contained no transcript text")
+                if isinstance(body.get("model"), str):
+                    self.resolved_model = body["model"]
+                if isinstance(body.get("system_fingerprint"), str):
+                    self.system_fingerprint = body["system_fingerprint"]
                 return self._clean_response(content)
             except (requests.RequestException, KeyError, IndexError, TypeError, ValueError) as exc:
                 last_error = exc

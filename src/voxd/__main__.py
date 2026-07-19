@@ -133,6 +133,15 @@ def _handle_autostart(value: str) -> int:
     return 0 if ok else 1
 
 
+def _handle_recording_archive(value: str) -> int:
+    enabled = _parse_bool(value)
+    cfg = AppConfig()
+    cfg.set("recording_archive_enabled", enabled)
+    cfg.save()
+    print(f"[archive] {'enabled' if enabled else 'disabled'}")
+    return 0
+
+
 def _mic_autoset_if_enabled(cfg: AppConfig) -> None:
     if not cfg.mic_autoset_enabled:
         return
@@ -177,6 +186,10 @@ def _diagnose(cfg: AppConfig) -> int:
     socket_path = Path(os.environ.get("YDOTOOL_SOCKET", str(Path.home() / ".ydotool_socket")))
     print(f"ydotool: {shutil.which('ydotool') or 'missing'}")
     print(f"ydotool socket: {'ok' if socket_path.exists() else 'missing'} ({socket_path})")
+    print(
+        f"recording archive: {'enabled' if cfg.recording_archive_enabled else 'disabled'} "
+        f"({cfg.recording_archive_max_mb} MB max, ffmpeg={shutil.which('ffmpeg') or 'missing'})"
+    )
 
     try:
         import sounddevice as sd
@@ -194,6 +207,11 @@ def main() -> None:
     parser.add_argument("--trigger-record", action="store_true", help="toggle recording in the tray")
     parser.add_argument("--setup", action="store_true", help="configure ydotool and desktop integration")
     parser.add_argument("--autostart", metavar="BOOL", help="enable or disable tray autostart")
+    parser.add_argument(
+        "--archive-recordings",
+        metavar="BOOL",
+        help="enable or disable private FLAC recording history",
+    )
     parser.add_argument("--diagnose", action="store_true", help="check E4B, ydotool, and audio")
     parser.add_argument("--version", action="store_true", help="print the installed version")
     args = parser.parse_args()
@@ -207,6 +225,8 @@ def main() -> None:
         raise SystemExit(0 if send_trigger() else 1)
     if args.autostart is not None:
         raise SystemExit(_handle_autostart(args.autostart))
+    if args.archive_recordings is not None:
+        raise SystemExit(_handle_recording_archive(args.archive_recordings))
     if args.setup:
         from voxd.utils.setup_user import run_user_setup
 

@@ -10,6 +10,8 @@ def test_gemma_transcription_defaults():
     assert cfg.gemma_timeout == 300
     assert 0 < cfg.gemma_segment_seconds < 30
     assert cfg.gemma_segment_overlap_seconds < cfg.gemma_segment_seconds
+    assert cfg.recording_archive_enabled is False
+    assert cfg.recording_archive_max_mb == 5120
     assert "gemma_transcription_prompt" not in cfg.data
 
 
@@ -49,6 +51,8 @@ def test_invalid_values_fall_back_to_safe_defaults():
                 "gemma_segment_seconds": 30,
                 "gemma_segment_overlap_seconds": 28,
                 "append_trailing_space": "yes",
+                "recording_archive_enabled": "yes",
+                "recording_archive_max_mb": 0,
             }
         ),
         encoding="utf-8",
@@ -60,6 +64,8 @@ def test_invalid_values_fall_back_to_safe_defaults():
     assert cfg.gemma_segment_seconds == DEFAULT_CONFIG["gemma_segment_seconds"]
     assert cfg.gemma_segment_overlap_seconds < cfg.gemma_segment_seconds
     assert cfg.append_trailing_space is DEFAULT_CONFIG["append_trailing_space"]
+    assert cfg.recording_archive_enabled is DEFAULT_CONFIG["recording_archive_enabled"]
+    assert cfg.recording_archive_max_mb == DEFAULT_CONFIG["recording_archive_max_mb"]
 
 
 def test_small_segment_always_gets_smaller_overlap():

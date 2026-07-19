@@ -8,6 +8,8 @@ append_trailing_space: true
 record_chunk_seconds: 300
 audio_prefer_pulse: true
 audio_input_device: ""
+recording_archive_enabled: false
+recording_archive_max_mb: 5120
 mic_autoset_enabled: true
 mic_autoset_level: 0.45
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from threading import Thread
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -22,11 +23,15 @@ class CoreProcessThread(QThread):
         self.should_stop = True
 
     def run(self) -> None:
+        from voxd.core.archive import RecordingArchive
         from voxd.core.clipboard import ClipboardManager
         from voxd.core.recorder import AudioRecorder
         from voxd.core.typer import YdotoolTyper
 
         transcript = ""
+        raw_transcript = ""
+        recording_path = None
+        dictation_error = None
         recorder = None
         try:
             transcriber = GemmaAudioTranscriber(
@@ -36,6 +41,7 @@ class CoreProcessThread(QThread):
                 overlap_seconds=self.cfg.gemma_segment_overlap_seconds,
                 timeout=self.cfg.gemma_timeout,
                 max_tokens=self.cfg.gemma_max_tokens,
+                delete_input=not self.cfg.recording_archive_enabled,
             )
             recorder = AudioRecorder(
                 chunk_seconds=self.cfg.record_chunk_seconds,
@@ -54,11 +60,13 @@ class CoreProcessThread(QThread):
                 self.msleep(100)
 
             self.status_changed.emit("Transcribing")
-            recording_path = recorder.stop_recording()
+            recording_path = recorder.stop_recording(
+                preserve=self.cfg.recording_archive_enabled
+            )
             if recording_path is None:
                 raise RuntimeError("recorder produced no audio file")
             warmup_thread.join()
-            transcript, _ = transcriber.transcribe(recording_path)
+            transcript, raw_transcript = transcriber.transcribe(recording_path)
             if not transcript:
                 raise RuntimeError("E4B returned an empty transcript")
 
@@ -87,14 +95,55 @@ class CoreProcessThread(QThread):
                 )
                 print(f"[core] Typing failed; {recovery}: {exc}", flush=True)
         except Exception as exc:
+            dictation_error = str(exc)
             print(f"[core] Dictation failed: {exc}", flush=True)
             if recorder is not None and recorder.is_recording:
                 try:
-                    recorder.stop_recording(preserve=True)
+                    recording_path = recorder.stop_recording(preserve=True)
                 except Exception:
-                    pass
+                    recording_path = recorder.last_temp_file
+            elif recorder is not None and recording_path is None:
+                # stop_recording can preserve a partial WAV and then raise for
+                # a capture/stream error before its return value is assigned.
+                recording_path = recorder.last_temp_file
             transcript = ""
         finally:
+            if (
+                self.cfg.recording_archive_enabled
+                and recording_path is not None
+                and recording_path.exists()
+            ):
+                try:
+                    RecordingArchive(
+                        max_bytes=self.cfg.recording_archive_max_mb * 1024 * 1024
+                    ).store(
+                        recording_path,
+                        {
+                            "transcription": {
+                                "configured_model": self.cfg.gemma_model,
+                                "error": dictation_error,
+                                "model": getattr(transcriber, "resolved_model", None),
+                                "overlap_seconds": self.cfg.gemma_segment_overlap_seconds,
+                                "prompt": transcriber.prompt,
+                                "prompt_sha256": hashlib.sha256(
+                                    transcriber.prompt.encode("utf-8")
+                                ).hexdigest(),
+                                "segments": raw_transcript.splitlines(),
+                                "segment_seconds": self.cfg.gemma_segment_seconds,
+                                "server_url": self.cfg.gemma_server_url,
+                                "status": "complete" if transcript else "failed",
+                                "system_fingerprint": getattr(
+                                    transcriber, "system_fingerprint", None
+                                ),
+                                "text": transcript,
+                            }
+                        },
+                    )
+                except Exception as exc:
+                    print(
+                        f"[core] Could not finalize recording archive: {exc}",
+                        flush=True,
+                    )
             self.finished.emit(transcript)
 
     @staticmethod

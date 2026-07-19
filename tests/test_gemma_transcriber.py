@@ -16,14 +16,20 @@ def _write_silence(path, *, duration_seconds: float, frame_rate: int = 100):
 
 
 class _Response:
-    def __init__(self, content):
+    def __init__(self, content, *, model=None, system_fingerprint=None):
         self._content = content
+        self._model = model
+        self._system_fingerprint = system_fingerprint
 
     def raise_for_status(self):
         return None
 
     def json(self):
-        return {"choices": [{"message": {"content": self._content}}]}
+        return {
+            "choices": [{"message": {"content": self._content}}],
+            "model": self._model,
+            "system_fingerprint": self._system_fingerprint,
+        }
 
 
 class _Session:
@@ -33,7 +39,10 @@ class _Session:
 
     def post(self, url, *, json, timeout):
         self.calls.append((url, json, timeout))
-        return _Response(next(self.responses))
+        response = next(self.responses)
+        if isinstance(response, _Response):
+            return response
+        return _Response(response)
 
 
 def test_gemma_segments_long_wav_and_merges_overlap(tmp_path):
@@ -96,6 +105,28 @@ def test_gemma_deletes_input_only_after_complete_success(tmp_path):
 
     assert transcriber.transcribe(audio)[0] == "namaste duniya"
     assert not audio.exists()
+
+
+def test_gemma_captures_resolved_model_identity(tmp_path):
+    from voxd.core.gemma_transcriber import GemmaAudioTranscriber
+
+    audio = tmp_path / "identity.wav"
+    _write_silence(audio, duration_seconds=1)
+    session = _Session(
+        [
+            _Response(
+                "namaste duniya",
+                model="gemma-e4b-q8",
+                system_fingerprint="server-build-1",
+            )
+        ]
+    )
+    transcriber = GemmaAudioTranscriber(delete_input=False, session=session)
+
+    transcriber.transcribe(audio)
+
+    assert transcriber.resolved_model == "gemma-e4b-q8"
+    assert transcriber.system_fingerprint == "server-build-1"
 
 
 def test_gemma_default_session_does_not_inherit_environment_proxies():

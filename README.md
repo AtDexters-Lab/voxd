@@ -16,6 +16,7 @@ paste-based insertion, or continuous VAD mode.
 - E4B's sub-30-second input limit through sequential 25-second segments with a
   1-second overlap
 - complete text insertion into terminals and coding tools through real key events
+- optional private FLAC recording history with transcript and model metadata
 - failure recovery: source audio is kept if transcription fails, and VOXD tries
   to copy the final transcript before typing
 
@@ -27,6 +28,7 @@ by memory. Transcription begins after Stop and processes each E4B segment in ord
 - Linux with PipeWire/PulseAudio or another PortAudio input
 - Python 3.9+
 - `ydotool`, `ydotoold`, and a working user `ydotoold.service`
+- `ffmpeg` when FLAC recording history is enabled (WAV is retained if unavailable)
 - an OpenAI-compatible E4B endpoint, defaulting to `http://localhost:9292`
 
 The endpoint must accept audio content at `/v1/chat/completions` using the
@@ -64,6 +66,8 @@ gemma_segment_seconds: 25
 gemma_segment_overlap_seconds: 1
 gemma_timeout: 300
 record_chunk_seconds: 300
+recording_archive_enabled: false
+recording_archive_max_mb: 5120
 typing_delay: 1
 typing_start_delay: 0.15
 ```
@@ -71,12 +75,25 @@ typing_start_delay: 0.15
 `record_chunk_seconds` controls on-disk chunk rotation, not maximum speech length.
 The E4B service should stay warm for low latency; VOXD does not own or restart it.
 
+Enable private benchmark history explicitly:
+
+```bash
+voxd --archive-recordings true
+```
+
+Audio is archived under `~/.local/share/voxd/recordings/` as FLAC with a JSON
+sidecar containing the transcript, raw segments, prompt, and model metadata.
+The archive is private to the current user and capped by
+`recording_archive_max_mb`. Compression failure retains the source WAV instead.
+
 Useful commands:
 
 ```bash
 voxd --diagnose
 voxd --autostart true
 voxd --autostart false
+voxd --archive-recordings true
+voxd --archive-recordings false
 voxd --version
 ```
 

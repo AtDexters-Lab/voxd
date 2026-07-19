@@ -24,6 +24,23 @@ def test_parse_bool_true_false(monkeypatch, tmp_path):
     assert main_mod._parse_bool("off") is False
 
 
+def test_recording_archive_enable_disable(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    import voxd.__main__ as main_mod
+    import voxd.core.config as config_mod
+
+    importlib.reload(config_mod)
+    importlib.reload(main_mod)
+
+    assert main_mod._handle_recording_archive("true") == 0
+    assert config_mod.AppConfig().recording_archive_enabled is True
+
+    assert main_mod._handle_recording_archive("false") == 0
+    assert config_mod.AppConfig().recording_archive_enabled is False
+
+
 def test_autostart_xdg_fallback_enable_disable(monkeypatch, tmp_path):
     # Force systemd --user to appear unavailable
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
